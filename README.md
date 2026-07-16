@@ -115,6 +115,8 @@ import * as tus from 'tus-js-client'
 
 const upload = new tus.Upload(file, {
   endpoint: 'http://localhost:8080/files',
+  retryDelays: [0, 1000, 3000, 5000],
+  chunkSize: 5 * 1024 * 1024, // 5MB — responsive progress for large files
   metadata: { filename: file.name, filetype: file.type },
   onError: (err) => console.error(err),
   onProgress: (bytesSent, bytesTotal) => console.log(`${bytesSent}/${bytesTotal}`),
@@ -122,6 +124,8 @@ const upload = new tus.Upload(file, {
 })
 upload.start()
 ```
+
+> **Tip:** Set `chunkSize` to a value like 5MB so progress updates frequently during large uploads. Without it, the entire file is sent in one PATCH request and progress jumps from 0% to 100%.
 
 ---
 
