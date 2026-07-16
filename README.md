@@ -129,9 +129,22 @@ upload.start()
 
 ---
 
-## IETF Resumable Upload Draft (v2)
+## Protocol Versions: TUS v1 vs IETF Draft (v2)
 
-Enable by setting `EnableExperimentalProtocol: true` in Config. The handler auto-detects
+| | TUS v1 | IETF Draft (v2) |
+|-----|:------:|:---------------:|
+| **Status** | ✅ Stable, production-ready | ⚠️ Experimental draft |
+| **Use when** | All production uploads | Interop testing, draft compliance |
+| **Client support** | All TUS clients (tus-js-client, tusd, etc.) | Limited (draft-specific clients) |
+| **Header detection** | `Tus-Resumable: 1.0.0` | `Upload-Draft-Interop-Version` |
+
+**Recommendation:** Use **TUS v1** for everything. The v2 draft is experimental — the protocol may
+change before final standardization. Enable v2 only if you need to test interop with other
+draft-compliant implementations.
+
+### Enabling v2
+
+Set `EnableExperimentalProtocol: true` in Config. The handler auto-detects
 `Upload-Draft-Interop-Version` headers and routes to the v2 protocol implementation.
 
 ```go
