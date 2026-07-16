@@ -138,8 +138,21 @@ upload.start()
 | **Client support** | All TUS clients (tus-js-client, tusd, etc.) | Limited (draft-specific clients) |
 | **Header detection** | `Tus-Resumable: 1.0.0` | `Upload-Draft-Interop-Version` |
 
-**Recommendation:** Use **TUS v1** for everything. The v2 draft is experimental — the protocol may
-change before final standardization. Enable v2 only if you need to test interop with other
+### Why v2 exists
+
+The IETF (Internet Engineering Task Force) is standardizing resumable uploads as an official
+[RFC](https://datatracker.ietf.org/doc/draft-ietf-httpbis-resumable-upload/), similar to how
+HTTP/2 and HTTP/3 were standardized. TUS v1 is a community protocol — the IETF draft aims to
+make it an official web standard with cleaner HTTP semantics.
+
+Key improvements in v2 over v1:
+- **Standard HTTP semantics** — Uses standard headers like `Content-Type: application/partial-upload` instead of custom `application/offset+octet-stream`
+- **`Upload-Complete/Incomplete`** — Clearer signaling for upload completion via boolean flags
+- **`Upload-Limit`** — Standardized way for servers to advertise limits (min/max size)
+- **Interim 1xx responses** — 104 Early Hints for better performance (not supported by fasthttp)
+
+**Recommendation:** Use **TUS v1** for everything. The v2 draft is experimental and may change
+before final standardization. Enable v2 only if you need to test interop with other
 draft-compliant implementations.
 
 ### Enabling v2
