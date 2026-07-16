@@ -1,4 +1,4 @@
-module github.com/tus/tusdfiber
+module github.com/maulanashalihin/tusdfiber
 
 go 1.26.1
 
@@ -6,6 +6,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.14
 	github.com/prometheus/client_golang v1.23.2
 	github.com/tus/tusd/v2 v2.10.0
+	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8
 )
 
 require (
@@ -28,7 +29,6 @@ require (
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
