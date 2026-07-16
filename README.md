@@ -85,7 +85,7 @@ func main() {
 	handler, err := tusdfiber.NewHandler(tusdfiber.Config{
 		StoreComposer: composer,
 		BasePath:      "/files/",
-		MaxSize:       100 * 1024 * 1024, // 100 MB
+		MaxSize:       1 * 1024 * 1024 * 1024, // 1 GB
 	})
 	if err != nil {
 		log.Fatal(err)
