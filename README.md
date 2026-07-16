@@ -28,7 +28,7 @@ Includes **TUS v1** and **IETF Resumable Upload Draft** (v2 protocol), **Prometh
 - ✅ **Locking** — file-based or memory-based lock coordination
 - ✅ **Method override** — `X-HTTP-Method-Override` for PATCH/DELETE in restricted environments
 - ✅ **No adaptor** — pure `func(c *fiber.Ctx) error`, no `http.Handler` bridge
-- ✅ **51 unit tests** — CI on every push, including E2E example tests
+- ✅ **53 unit tests** — CI on every push, including E2E example tests
 - ✅ **E2E tested** — full TUS upload cycle tested: POST → HEAD → PATCH → HEAD → GET → DELETE
 
 ---
@@ -380,7 +380,7 @@ All tusd data stores work out of the box:
 | File / HTTP / gRPC hooks | ✅ | ✅ (same, via import) |
 | Prometheus metrics | ✅ | ✅ |
 | Callback hooks | ✅ | ✅ |
-| Unit tests | ✅ | ✅ (51 tests) |
+| Unit tests | ✅ | ✅ (53 tests) |
 | Dependencies | `net/http` only | Fiber + fasthttp |
 
 ---
