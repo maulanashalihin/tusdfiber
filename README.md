@@ -28,7 +28,8 @@ Includes **TUS v1** and **IETF Resumable Upload Draft** (v2 protocol), **Prometh
 - ✅ **Locking** — file-based or memory-based lock coordination
 - ✅ **Method override** — `X-HTTP-Method-Override` for PATCH/DELETE in restricted environments
 - ✅ **No adaptor** — pure `func(c *fiber.Ctx) error`, no `http.Handler` bridge
-- ✅ **33 unit tests** — CI on every push
+- ✅ **51 unit tests** — CI on every push, including E2E example tests
+- ✅ **E2E tested** — full TUS upload cycle tested: POST → HEAD → PATCH → HEAD → GET → DELETE
 
 ---
 
@@ -141,6 +142,12 @@ The v2 protocol supports:
 | `Content-Type: application/partial-upload` | Chunk content type (v4+) |
 
 HEAD responses return `204 No Content` instead of `200 OK` for v2 requests.
+
+> **Note:** The draft spec recommends sending `104 Early Hints` before processing
+> the request body, but fasthttp does not support sending interim 1xx responses.
+> Instead, all response headers (including Location) are sent in the final `201 Created` response.
+> This has no impact on client compatibility — tus-js-client and other implementations
+> handle both patterns correctly.
 
 ---
 
@@ -322,7 +329,7 @@ All tusd data stores work out of the box:
 | File / HTTP / gRPC hooks | ✅ | ✅ (same, via import) |
 | Prometheus metrics | ✅ | ✅ |
 | Callback hooks | ✅ | ✅ |
-| Unit tests | ✅ | ✅ (33 tests) |
+| Unit tests | ✅ | ✅ (51 tests) |
 | Dependencies | `net/http` only | Fiber + fasthttp |
 
 ---
@@ -360,6 +367,36 @@ All tusd data stores work out of the box:
 │  └────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────┘
 ```
+
+---
+
+## Testing
+
+```bash
+# All tests (unit + integration)
+go test -v -count=1 -race ./...
+
+# Just helper tests
+go test -v -count=1 -run 'Test(Parse|Serialize|Validate|Body|Config|New|TUSError)' .
+
+# Just HTTP integration tests
+go test -v -count=1 -run 'TestHandler_' .
+
+# Just E2E example tests (uses filestore, real TUS upload cycle)
+go test -v -count=1 ./example/
+
+```
+
+Tests cover:
+
+| Layer | File | Tests |
+|-------|------|:-----:|
+| **Helpers** — metadata, concat, upload length, content-type | `tusdfiber_test.go` | 20 |
+| **Body reader** — streaming, limits, error handling | `tusdfiber_test.go` | 4 |
+| **Config validation** — defaults, missing fields, path normalization | `tusdfiber_test.go` | 4 |
+| **Handler integration** — POST, HEAD, PATCH, GET, DELETE via `fiber.Test()` | `handler_test.go` | 11 |
+| **Draft protocol** — v2 OPTIONS with `Upload-Draft-Interop-Version` | `handler_test.go` | 1 |
+| **E2E example** — full TUS cycle + chunked upload + OPTIONS | `example/example_test.go` | 3 |
 
 ---
 
