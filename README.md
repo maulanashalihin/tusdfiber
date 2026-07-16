@@ -2,28 +2,33 @@
 
 **Native TUS resumable upload protocol for Go Fiber / fasthttp.**
 
+[![CI](https://github.com/maulanashalihin/tusdfiber/actions/workflows/ci.yml/badge.svg)](https://github.com/maulanashalihin/tusdfiber/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/maulanashalihin/tusdfiber.svg)](https://pkg.go.dev/github.com/maulanashalihin/tusdfiber)
 [![Go Report Card](https://goreportcard.com/badge/github.com/maulanashalihin/tusdfiber)](https://goreportcard.com/report/github.com/maulanashalihin/tusdfiber)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`tusdfiber` implements the [TUS resumable upload protocol v1](https://tus.io/protocols/resumable-upload) natively on Go Fiber — no `adaptor.HTTPHandler()` wrapper needed. All handlers accept `func(c *fiber.Ctx) error` directly.
+`tusdfiber` implements the [TUS resumable upload protocol](https://tus.io/protocols/resumable-upload) natively on Go Fiber — no `adaptor.HTTPHandler()` wrapper needed. All handlers accept `func(c *fiber.Ctx) error` directly.
 
-Storage backends from [tusd](https://github.com/tus/tusd) (FileStore, S3, GCS, Azure) are fully compatible.
+Includes **TUS v1** and **IETF Resumable Upload Draft** (v2 protocol), **Prometheus metrics**, and full compatibility with [tusd](https://github.com/tus/tusd) storage backends (FileStore, S3, GCS, Azure) and hook systems (file, HTTP, gRPC).
 
 ---
 
 ## Features
 
 - ✅ **TUS v1** — POST (create), HEAD (offset), PATCH (upload chunk), GET (download), DELETE (terminate), OPTIONS (discovery)
-- ✅ **Streaming body** — reads PATCH request body via fasthttp `RequestBodyStream()`, no full buffering
+- ✅ **IETF Resumable Upload Draft (v2)** — `Upload-Draft-Interop-Version` 3–6, `Upload-Complete/Incomplete`, 104 Early Hints, `Upload-Limit`
+- ✅ **Streaming body** — reads PATCH body via fasthttp `RequestBodyStream()`, no full buffering
 - ✅ **CORS** — configurable origin allowlist, credentials, headers
 - ✅ **Concatenation** — partial & final uploads (`Upload-Concat`)
 - ✅ **Deferred length** — uploads with unknown size (`Upload-Defer-Length`)
 - ✅ **Notifications** — channels for complete, created, terminated, progress events
 - ✅ **Callbacks** — pre-create, pre-finish, pre-terminate hooks
+- ✅ **Hooks system** — file, HTTP, gRPC hooks via tusd `HookHandler` interface
+- ✅ **Prometheus metrics** — uploads created/finished/terminated, bytes, errors, active uploads
 - ✅ **Locking** — file-based or memory-based lock coordination
 - ✅ **Method override** — `X-HTTP-Method-Override` for PATCH/DELETE in restricted environments
 - ✅ **No adaptor** — pure `func(c *fiber.Ctx) error`, no `http.Handler` bridge
+- ✅ **33 unit tests** — CI on every push
 
 ---
 
@@ -33,7 +38,7 @@ Storage backends from [tusd](https://github.com/tus/tusd) (FileStore, S3, GCS, A
 go get github.com/maulanashalihin/tusdfiber
 ```
 
-You'll also need a storage backend. Install one from tusd:
+Storage backend (pick one):
 
 ```bash
 go get github.com/tus/tusd/v2/pkg/filestore
@@ -101,22 +106,119 @@ func main() {
 ```js
 import * as tus from 'tus-js-client'
 
-const file = document.querySelector('input[type=file]').files[0]
-
 const upload = new tus.Upload(file, {
   endpoint: 'http://localhost:8080/files',
-  metadata: {
-    filename: file.name,
-    filetype: file.type,
-  },
+  metadata: { filename: file.name, filetype: file.type },
   onError: (err) => console.error(err),
-  onProgress: (bytesSent, bytesTotal) =>
-    console.log(`${bytesSent}/${bytesTotal}`),
+  onProgress: (bytesSent, bytesTotal) => console.log(`${bytesSent}/${bytesTotal}`),
   onSuccess: () => console.log('Done!'),
 })
-
 upload.start()
 ```
+
+---
+
+## IETF Resumable Upload Draft (v2)
+
+Enable by setting `EnableExperimentalProtocol: true` in Config. The handler auto-detects
+`Upload-Draft-Interop-Version` headers and routes to the v2 protocol implementation.
+
+```go
+handler, _ := tusdfiber.NewHandler(tusdfiber.Config{
+    StoreComposer:              composer,
+    BasePath:                   "/files/",
+    EnableExperimentalProtocol: true, // ← enables v2 protocol
+})
+```
+
+The v2 protocol supports:
+
+| Header | Purpose |
+|--------|---------|
+| `Upload-Draft-Interop-Version` | Protocol version (`3`, `4`, `5`, `6`) |
+| `Upload-Complete: ?1` / `Upload-Incomplete: ?0` | Upload completion signal |
+| `Upload-Limit: min-size=0,max-size=N` | Server-enforced limits |
+| `Content-Type: application/partial-upload` | Chunk content type (v4+) |
+
+HEAD responses return `204 No Content` instead of `200 OK` for v2 requests.
+
+---
+
+## Prometheus Metrics
+
+```go
+import "github.com/gofiber/fiber/v2/middleware/adaptor"
+
+m := tusdfiber.NewMetrics(nil)
+
+// Count requests & active uploads
+app.Use(m.Middleware())
+
+// Expose metrics endpoint
+app.Get("/metrics", adaptor.HTTPHandler(tusdfiber.PromHTTPHandler()))
+```
+
+### Available Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `tusdfiber_uploads_created_total` | Counter | — |
+| `tusdfiber_uploads_finished_total` | Counter | — |
+| `tusdfiber_uploads_terminated_total` | Counter | — |
+| `tusdfiber_bytes_received_total` | Counter | — |
+| `tusdfiber_errors_total` | CounterVec | `code` |
+| `tusdfiber_requests_total` | CounterVec | `method` |
+| `tusdfiber_active_uploads` | Gauge | — |
+| `tusdfiber_hook_invocations_total` | CounterVec | `hooktype` |
+| `tusdfiber_hook_errors_total` | CounterVec | `hooktype` |
+
+---
+
+## Hooks System
+
+Use tusd's file, HTTP, or gRPC hooks with `NewHandlerWithHooks`:
+
+### File Hooks
+
+```go
+import "github.com/tus/tusd/v2/pkg/hooks/file"
+
+handler, err := tusdfiber.NewHandlerWithHooks(config, &file.FileHook{
+    Directory: "./hooks",
+}, tusdfiber.AvailableHooks)
+```
+
+### HTTP Hooks
+
+```go
+import "github.com/tus/tusd/v2/pkg/hooks/http"
+
+handler, err := tusdfiber.NewHandlerWithHooks(config, &http.HttpHook{
+    Endpoint: "https://example.com/hooks",
+}, tusdfiber.AvailableHooks)
+```
+
+### gRPC Hooks
+
+```go
+import "github.com/tus/tusd/v2/pkg/hooks/grpc"
+
+handler, err := tusdfiber.NewHandlerWithHooks(config, &grpc.GrpcHook{
+    Endpoint: "localhost:50051",
+}, tusdfiber.AvailableHooks)
+```
+
+### Available Hook Types
+
+| Hook | When | Can Reject |
+|------|------|:----------:|
+| `HookPreCreate` | Before upload creation | ✅ |
+| `HookPostCreate` | After upload creation | ❌ |
+| `HookPostReceive` | During chunk upload | ✅ (stop) |
+| `HookPreFinish` | Before upload completion | ❌ |
+| `HookPostFinish` | After upload completion | ❌ |
+| `HookPreTerminate` | Before upload termination | ✅ |
+| `HookPostTerminate` | After upload termination | ❌ |
 
 ---
 
@@ -124,24 +226,26 @@ upload.start()
 
 ### `tusdfiber.NewHandler(config)`
 
-Creates a routed TUS handler.
+Creates a routed TUS handler (TUS v1 + auto-detection of v2 draft).
+
+### `tusdfiber.NewHandlerWithHooks(config, hookHandler, enabledHooks)`
+
+Creates a routed handler with tusd-compatible hook integration.
 
 ### `tusdfiber.NewUnroutedHandler(config)`
 
-Creates an unrouted handler — you wire the methods yourself:
+Creates an unrouted handler for manual route wiring:
 
-| Method | Fiber Handler | Description |
-|--------|---------------|-------------|
-| `PostFile` | `func(c *fiber.Ctx) error` | Create upload |
-| `HeadFile` | `func(c *fiber.Ctx) error` | Get offset |
-| `PatchFile` | `func(c *fiber.Ctx) error` | Upload chunk |
-| `GetFile` | `func(c *fiber.Ctx) error` | Download |
-| `DelFile` | `func(c *fiber.Ctx) error` | Terminate |
-| `Options` | `func(c *fiber.Ctx) error` | Protocol discovery |
+| Method | Description |
+|--------|-------------|
+| `PostFile` | Create upload (routes to v2 if draft detected) |
+| `HeadFile` | Get offset |
+| `PatchFile` | Upload chunk |
+| `GetFile` | Download |
+| `DelFile` | Terminate |
+| `Options` | Protocol discovery |
 
 ### `handler.Register(router)`
-
-Registers all TUS routes on a Fiber router:
 
 | Route | Method | Purpose |
 |-------|--------|---------|
@@ -149,16 +253,18 @@ Registers all TUS routes on a Fiber router:
 | `{BasePath}` | OPTIONS | Protocol discovery |
 | `{BasePath}:id` | HEAD | Get offset/info |
 | `{BasePath}:id` | PATCH | Upload chunk |
-| `{BasePath}:id` | GET | Download (if enabled) |
-| `{BasePath}:id` | DELETE | Terminate (if enabled) |
+| `{BasePath}:id` | GET | Download |
+| `{BasePath}:id` | DELETE | Terminate |
 
 ### `tusdfiber.DefaultMiddlewareStack(corsConfig)`
 
-Returns the standard middleware chain:
+```go
+app.Use(tusdfiber.DefaultMiddlewareStack(nil)...)
+```
 
-1. `MethodOverrideMiddleware()` — `X-HTTP-Method-Override` support
+1. `MethodOverrideMiddleware()` — `X-HTTP-Method-Override`
 2. `CORSMiddleware(cfg)` — CORS headers & preflight
-3. `TusResumableMiddleware()` — `Tus-Resumable: 1.0.0` validation
+3. `TusResumableMiddleware()` — `Tus-Resumable: 1.0.0` / `Upload-Draft-Interop-Version`
 
 ---
 
@@ -172,6 +278,7 @@ type Config struct {
     DisableDownload               bool
     DisableTermination            bool
     DisableConcatenation          bool
+    EnableExperimentalProtocol    bool  // v2 IETF draft
     NotifyCompleteUploads         bool
     NotifyTerminatedUploads       bool
     NotifyUploadProgress          bool
@@ -188,78 +295,35 @@ type Config struct {
 }
 ```
 
-### CORS
-
-```go
-config := tusdfiber.Config{
-    CORS: &tusdfiber.CORSConfig{
-        AllowOrigin:      regexp.MustCompile(`^https://myapp\.com$`),
-        AllowCredentials: true,
-        MaxAge:           "3600",
-    },
-}
-```
-
-Pass `nil` to use the default (allow all origins).
-
 ---
 
 ## Storage Backends
 
 All tusd data stores work out of the box:
 
-| Store | Import | Description |
-|-------|--------|-------------|
-| **FileStore** | `github.com/tus/tusd/v2/pkg/filestore` | Local disk |
-| **S3Store** | `github.com/tus/tusd/v2/pkg/s3store` | AWS S3 / MinIO |
-| **GCSStore** | `github.com/tus/tusd/v2/pkg/gcsstore` | Google Cloud Storage |
-| **AzureStore** | `github.com/tus/tusd/v2/pkg/azurestore` | Azure Blob Storage |
-
-### S3 Example
-
-```go
-import (
-    "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/service/s3"
-    "github.com/tus/tusd/v2/pkg/s3store"
-)
-
-cfg, _ := config.LoadDefaultConfig(ctx)
-client := s3.NewFromConfig(cfg)
-
-composer := tusdfiber.NewStoreComposer()
-s3store.New("my-bucket", client).UseIn(composer.StoreComposer)
-memorylocker.New().UseIn(composer.StoreComposer)
-```
+| Store | Import |
+|-------|--------|
+| **FileStore** | `github.com/tus/tusd/v2/pkg/filestore` |
+| **S3Store** | `github.com/tus/tusd/v2/pkg/s3store` |
+| **GCSStore** | `github.com/tus/tusd/v2/pkg/gcsstore` |
+| **AzureStore** | `github.com/tus/tusd/v2/pkg/azurestore` |
 
 ---
 
-## Notifications
+## Comparison
 
-```go
-handler, _ := tusdfiber.NewHandler(config)
-
-go func() {
-    for ev := range handler.CompleteUploads {
-        // Upload finished
-        log.Printf("Done: %s (%d bytes)", ev.Upload.ID, ev.Upload.Size)
-    }
-}()
-
-go func() {
-    for ev := range handler.CreatedUploads {
-        // Upload created
-        log.Printf("New: %s", ev.Upload.ID)
-    }
-}()
-
-go func() {
-    for ev := range handler.UploadProgress {
-        // Progress update (requires NotifyUploadProgress: true)
-        log.Printf("Progress %s: %d/%d", ev.Upload.ID, ev.Upload.Offset, ev.Upload.Size)
-    }
-}()
-```
+| Feature | tusd (`net/http`) | tusdfiber (Fiber) |
+|---------|:---:|:---:|
+| Native Fiber handler | ❌ | ✅ |
+| Streaming body | ✅ | ✅ |
+| TUS v1 protocol | ✅ | ✅ |
+| IETF draft protocol | ✅ | ✅ |
+| Storage backends | ✅ | ✅ (same, via import) |
+| File / HTTP / gRPC hooks | ✅ | ✅ (same, via import) |
+| Prometheus metrics | ✅ | ✅ |
+| Callback hooks | ✅ | ✅ |
+| Unit tests | ✅ | ✅ (33 tests) |
+| Dependencies | `net/http` only | Fiber + fasthttp |
 
 ---
 
@@ -273,10 +337,11 @@ go func() {
 │  │  ├─ MethodOverrideMiddleware()              │   │
 │  │  ├─ CORSMiddleware()                        │   │
 │  │  └─ TusResumableMiddleware()                │   │
+│  │  ┌─ MetricsMiddleware()         (optional)  │   │
 │  └────────────────────────────────────────────┘   │
 │  ┌────────────────────────────────────────────┐   │
 │  │  Handler.Register()                        │   │
-│  │  POST   /files     → PostFile              │   │
+│  │  POST   /files     → PostFile / PostFileV2 │   │
 │  │  HEAD   /files/:id → HeadFile              │   │
 │  │  PATCH  /files/:id → PatchFile             │   │
 │  │  GET    /files/:id → GetFile               │   │
@@ -287,40 +352,14 @@ go func() {
 │  │  UnroutedHandler                           │   │
 │  │  ├─ BodyReader (fasthttp streaming)        │   │
 │  │  ├─ Context  (delayed cancellation)        │   │
+│  │  ├─ Hooks    (file/HTTP/gRPC via tusd)     │   │
 │  │  └─ StoreComposer → tusd DataStore         │   │
+│  └────────────────────────────────────────────┘   │
+│  ┌────────────────────────────────────────────┐   │
+│  │  /metrics  →  Prometheus                   │   │
 │  └────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────┘
 ```
-
----
-
-## Comparison
-
-| Feature | tusd (`net/http`) | tusdfiber (Fiber) |
-|---------|:---:|:---:|
-| Native Fiber handler | ❌ | ✅ |
-| Streaming body | ✅ | ✅ |
-| TUS v1 protocol | ✅ | ✅ |
-| IETF draft protocol | ✅ | ❌ (planned) |
-| Storage backends | ✅ FileStore, S3, GCS, Azure | ✅ (same, via import) |
-| Hooks | ✅ File, HTTP, gRPC, Plugin | ✅ Callback-based |
-| Metrics | ✅ Prometheus | ❌ (planned) |
-| Dependencies | `net/http` only | Fiber + fasthttp |
-
----
-
-## Roadmap
-
-- [x] TUS v1 core (POST, HEAD, PATCH)
-- [x] Download (GET)
-- [x] Termination (DELETE)
-- [x] CORS
-- [x] Concatenation
-- [x] Deferred length
-- [ ] IETF Resumable Upload Draft (v2 protocol)
-- [ ] Prometheus metrics
-- [ ] Unit test coverage
-- [ ] File / HTTP hook integrations
 
 ---
 
