@@ -422,15 +422,7 @@ func (h *UnroutedHandler) GetFile(c *fiber.Ctx) error {
 
 	contentType, contentDisposition := filterContentType(info)
 
-	// If the store has a ContentServer delegate
-	if h.composer.UsesContentServer {
-		servable := h.composer.ContentServer.AsServableUpload(upload)
-		c.Set("Content-Type", contentType)
-		c.Set("Content-Disposition", contentDisposition)
-		// Delegate to the store's ServeContent — it writes directly.
-		return servable.ServeContent(ctx, newFiberResponseWriter(c), &http.Request{})
-	}
-
+	// Handle empty upload before any data has been sent
 	if info.Offset == 0 {
 		return h.sendResp(c, HTTPResponse{StatusCode: http.StatusNoContent})
 	}
@@ -440,6 +432,7 @@ func (h *UnroutedHandler) GetFile(c *fiber.Ctx) error {
 	c.Set("Content-Length", strconv.FormatInt(info.Offset, 10))
 	c.Status(http.StatusOK)
 
+	// Try the GetReader path (works with all stores, including filestore, s3store, etc.)
 	reader, err := upload.GetReader(ctx)
 	if err != nil {
 		return h.writeError(c, ctx, err)
