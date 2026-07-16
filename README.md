@@ -48,6 +48,8 @@ go get github.com/tus/tusd/v2/pkg/filelocker  # always required
 
 > **Note:** `filestore` is one of several storage backends — pick **one** store that fits your infra (`filestore` for local, `s3store` for S3, `gcsstore` for GCS, `azurestore` for Azure). `filelocker` is always needed regardless of which store you choose.
 
+> **⚠️ Important:** Your Fiber app **must** set `StreamRequestBody: true` in `fiber.Config`. Without this, large uploads will hang because fasthttp tries to buffer the entire request body in memory instead of streaming it to the TUS handler. See Quick Start below.
+
 ---
 
 ## Quick Start
@@ -303,6 +305,14 @@ type Config struct {
     CORS                          *CORSConfig
 }
 ```
+
+> **⚠️ Important:** When creating your Fiber app, always enable `StreamRequestBody: true`:
+> ```go
+> app := fiber.New(fiber.Config{
+>     StreamRequestBody: true, // required for TUS
+> })
+> ```
+> Without this, `fasthttp` buffers the entire request body in memory, causing large uploads to hang or exhaust server memory.
 
 ---
 
