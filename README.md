@@ -39,12 +39,14 @@ Includes **TUS v1** and **IETF Resumable Upload Draft** (v2 protocol), **Prometh
 go get github.com/maulanashalihin/tusdfiber
 ```
 
-Storage backend (pick one):
+Storage backend and locker (both required):
 
 ```bash
-go get github.com/tus/tusd/v2/pkg/filestore
-go get github.com/tus/tusd/v2/pkg/filelocker
+go get github.com/tus/tusd/v2/pkg/filestore   # or: s3store, gcsstore, azurestore
+go get github.com/tus/tusd/v2/pkg/filelocker  # always required
 ```
+
+> **Note:** `filestore` is one of several storage backends — pick **one** store that fits your infra (`filestore` for local, `s3store` for S3, `gcsstore` for GCS, `azurestore` for Azure). `filelocker` is always needed regardless of which store you choose.
 
 ---
 
