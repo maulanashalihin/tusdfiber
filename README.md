@@ -50,6 +50,8 @@ go get github.com/tus/tusd/v2/pkg/filelocker  # always required
 
 > **⚠️ Important:** Your Fiber app **must** set `StreamRequestBody: true` in `fiber.Config`. Without this, large uploads will hang because fasthttp tries to buffer the entire request body in memory instead of streaming it to the TUS handler. See Quick Start below.
 
+> **⚠️ Notification channels:** If you enable `NotifyCompleteUploads`, `NotifyCreatedUploads`, or `NotifyTerminatedUploads`, you **must** drain the corresponding channel (`handler.CompleteUploads`, etc.) in a goroutine. These channels are unbuffered — sending blocks until someone reads. See the [example](example/main.go) for the drain pattern.
+
 ---
 
 ## Quick Start
