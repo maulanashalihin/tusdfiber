@@ -194,10 +194,12 @@ import "github.com/gofiber/fiber/v2/middleware/adaptor"
 
 m := tusdfiber.NewMetrics(nil)
 
-// Count requests & active uploads
+// Count requests & active uploads (Fiber-native middleware)
 app.Use(m.Middleware())
 
-// Expose metrics endpoint
+// Expose metrics endpoint — uses adaptor because promhttp.Handler()
+// (from the Prometheus Go client) is net/http-based. This is the ONLY
+// place adaptor appears — all TUS protocol handling is pure Fiber.
 app.Get("/metrics", adaptor.HTTPHandler(tusdfiber.PromHTTPHandler()))
 ```
 
