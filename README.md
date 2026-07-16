@@ -331,6 +331,15 @@ All tusd data stores work out of the box:
 
 ---
 
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Upload hangs / request pending | `StreamRequestBody: true` not set in `fiber.Config` | Add `StreamRequestBody: true` (see Quick Start) |
+| Upload hangs with notifications enabled | Notification channels are unbuffered and nobody is draining them | Set `Notify*` to `false`, or drain channels in a goroutine |
+| PATCH returns 404 | `BasePath` doesn't match actual route path when using Fiber groups | Register directly on `app` (not a group), or set `BasePath` to include the group prefix |
+| CORS preflight (OPTIONS) blocked | Auth middleware rejecting OPTIONS before CORS middleware runs | Make sure auth middleware skips `MethodOptions` requests |
+
 ## Comparison
 
 | Feature | tusd (`net/http`) | tusdfiber (Fiber) |
