@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	tusd "github.com/tus/tusd/v2/pkg/handler"
 )
 
 // UnroutedHandler provides TUS protocol methods (PostFile, HeadFile, PatchFile, …)
@@ -766,13 +767,27 @@ func (h *UnroutedHandler) sendResp(c *fiber.Ctx, resp HTTPResponse) error {
 }
 
 func (h *UnroutedHandler) writeError(c *fiber.Ctx, ctx *hookContext, err error) error {
-	var tErr *TUSError
-	if e, ok := err.(*TUSError); ok {
-		tErr = e
-	} else {
-		_ = ctx // for logging, would use ctx.log
-		tErr = NewError("ERR_INTERNAL_SERVER_ERROR", err.Error(), http.StatusInternalServerError)
+	// Try our own error type first
+	if tErr, ok := err.(*TUSError); ok {
+		for k, v := range tErr.HTTPResponse.Header {
+			c.Set(k, v)
+		}
+		c.Status(tErr.HTTPResponse.StatusCode)
+		return c.SendString(tErr.HTTPResponse.Body)
 	}
+
+	// Try tusd's error type (value, not pointer — tusd.NewError returns value)
+	if tdErr, ok := err.(tusd.Error); ok {
+		for k, v := range tdErr.HTTPResponse.Header {
+			c.Set(k, v)
+		}
+		c.Status(tdErr.HTTPResponse.StatusCode)
+		return c.SendString(tdErr.HTTPResponse.Body)
+	}
+
+	// Fallback
+	_ = ctx
+	tErr := NewError("ERR_INTERNAL_SERVER_ERROR", err.Error(), http.StatusInternalServerError)
 	for k, v := range tErr.HTTPResponse.Header {
 		c.Set(k, v)
 	}
@@ -796,12 +811,21 @@ func (ctx *hookContext) log(c *fiber.Ctx, event string, keysAndValues ...interfa
 // ---------------------------------------------------------------------------
 
 func writeError(c *fiber.Ctx, err error) error {
-	var tErr *TUSError
-	if e, ok := err.(*TUSError); ok {
-		tErr = e
-	} else {
-		tErr = NewError("ERR_INTERNAL_SERVER_ERROR", err.Error(), http.StatusInternalServerError)
+	if tErr, ok := err.(*TUSError); ok {
+		for k, v := range tErr.HTTPResponse.Header {
+			c.Set(k, v)
+		}
+		c.Status(tErr.HTTPResponse.StatusCode)
+		return c.SendString(tErr.HTTPResponse.Body)
 	}
+	if tdErr, ok := err.(tusd.Error); ok {
+		for k, v := range tdErr.HTTPResponse.Header {
+			c.Set(k, v)
+		}
+		c.Status(tdErr.HTTPResponse.StatusCode)
+		return c.SendString(tdErr.HTTPResponse.Body)
+	}
+	tErr := NewError("ERR_INTERNAL_SERVER_ERROR", err.Error(), http.StatusInternalServerError)
 	for k, v := range tErr.HTTPResponse.Header {
 		c.Set(k, v)
 	}

@@ -9,7 +9,12 @@ import (
 
 // CORSMiddleware returns a Fiber handler that adds CORS headers and handles
 // preflight OPTIONS requests according to the TUS protocol.
+// If cfg is nil, the DefaultCORSConfig is used.
 func CORSMiddleware(cfg *CORSConfig) fiber.Handler {
+	if cfg == nil {
+		def := DefaultCORSConfig
+		cfg = &def
+	}
 	return func(c *fiber.Ctx) error {
 		if cfg.Disable {
 			return c.Next()
