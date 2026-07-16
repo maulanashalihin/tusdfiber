@@ -190,17 +190,13 @@ HEAD responses return `204 No Content` instead of `200 OK` for v2 requests.
 ## Prometheus Metrics
 
 ```go
-import "github.com/gofiber/fiber/v2/middleware/adaptor"
-
 m := tusdfiber.NewMetrics(nil)
 
-// Count requests & active uploads (Fiber-native middleware)
+// Count requests & active uploads
 app.Use(m.Middleware())
 
-// Expose metrics endpoint — uses adaptor because promhttp.Handler()
-// (from the Prometheus Go client) is net/http-based. This is the ONLY
-// place adaptor appears — all TUS protocol handling is pure Fiber.
-app.Get("/metrics", adaptor.HTTPHandler(tusdfiber.PromHTTPHandler()))
+// Expose metrics endpoint (Fiber-native, no adaptor)
+app.Get("/metrics", tusdfiber.PrometheusHandler())
 ```
 
 ### Available Metrics

@@ -1,12 +1,10 @@
 package tusdfiber
 
 import (
-	"net/http"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 )
 
 // Metrics holds Prometheus collectors for TUS operations.
@@ -72,11 +70,29 @@ func (m *Metrics) Middleware() fiber.Handler {
 	}
 }
 
-// PromHTTPHandler returns the standard Prometheus HTTP handler (http.Handler)
-// so you can mount it via Fiber's adaptor:
+// PrometheusHandler returns a Fiber-native handler that renders Prometheus metrics
+// in text format. No adaptor needed.
 //
-//	import "github.com/gofiber/fiber/v2/middleware/adaptor"
-//	app.Get("/metrics", adaptor.HTTPHandler(tusdfiber.PromHTTPHandler()))
-func PromHTTPHandler() http.Handler {
-	return promhttp.Handler()
+//	app.Get("/metrics", m.Middleware(), tusdfiber.PrometheusHandler())
+func PrometheusHandler() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			if len(mfs) == 0 {
+				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+			}
+			// Partial data available — still serve it
+		}
+
+		c.Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		c.Set("X-Content-Type-Options", "nosniff")
+
+		enc := expfmt.NewEncoder(c.Response().BodyWriter(), expfmt.FmtText)
+		for _, mf := range mfs {
+			if encodeErr := enc.Encode(mf); encodeErr != nil {
+				return encodeErr
+			}
+		}
+		return nil
+	}
 }
