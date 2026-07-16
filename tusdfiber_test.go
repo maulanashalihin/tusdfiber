@@ -4,8 +4,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // ---------------------------------------------------------------------------
@@ -486,4 +490,88 @@ type mockTerminatableUpload struct{}
 func (m *mockTerminatableUpload) Terminate(ctx context.Context) error {
 	_ = ctx
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Prometheus Metrics
+// ---------------------------------------------------------------------------
+
+func TestPrometheusHandler_ReturnsMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	m.UploadsCreated.Inc()
+	m.UploadsCreated.Inc()
+	m.UploadsFinished.Inc()
+	m.UploadsTerminated.Inc()
+	m.BytesReceived.Add(1024 * 1024)
+	m.ErrorsTotal.WithLabelValues("ERR_TEST").Inc()
+	m.RequestsTotal.WithLabelValues("POST").Inc()
+
+	app := fiber.New()
+	app.Get("/metrics", PrometheusHandler(reg))
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal("GET /metrics:", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	t.Logf("Metrics output:\n%s", s)
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		t.Error("missing Content-Type header")
+	}
+
+	// Prometheus formats bytes as float, so check with decimal
+	checks := []string{
+		`tusdfiber_uploads_created_total 2`,
+		`tusdfiber_uploads_finished_total 1`,
+		`tusdfiber_uploads_terminated_total 1`,
+		`tusdfiber_bytes_received_total 1.048576e+06`,
+		`tusdfiber_errors_total{code="ERR_TEST"} 1`,
+		`tusdfiber_requests_total{method="POST"} 1`,
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(s, check) {
+			t.Errorf("missing metric in output: %s", check)
+		}
+	}
+}
+
+func TestPrometheusMiddleware_CountsRequests(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	app := fiber.New()
+	app.Use(m.Middleware())
+	app.Get("/test", func(c *fiber.Ctx) error {
+		return c.SendString("ok")
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	resp, _ := app.Test(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	_ = body
+
+	// Verify request was counted via separate Fiber app using same registry
+	app2 := fiber.New()
+	app2.Get("/metrics", PrometheusHandler(reg))
+	checkReq := httptest.NewRequest("GET", "/metrics", nil)
+	checkResp, _ := app2.Test(checkReq)
+	checkBody, _ := io.ReadAll(checkResp.Body)
+	if !strings.Contains(string(checkBody), `tusdfiber_requests_total{method="GET"} 1`) {
+		t.Error("GET request not counted in metrics")
+	}
 }

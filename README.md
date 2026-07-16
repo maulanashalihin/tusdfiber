@@ -196,7 +196,7 @@ m := tusdfiber.NewMetrics(nil)
 app.Use(m.Middleware())
 
 // Expose metrics endpoint (Fiber-native, no adaptor)
-app.Get("/metrics", tusdfiber.PrometheusHandler())
+app.Get("/metrics", tusdfiber.PrometheusHandler(nil))
 ```
 
 ### Available Metrics

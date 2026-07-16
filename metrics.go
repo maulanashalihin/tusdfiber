@@ -74,9 +74,14 @@ func (m *Metrics) Middleware() fiber.Handler {
 // in text format. No adaptor needed.
 //
 //	app.Get("/metrics", m.Middleware(), tusdfiber.PrometheusHandler())
-func PrometheusHandler() fiber.Handler {
+//
+// Pass a custom prometheus.Gatherer to use a non-default registry, or nil for DefaultGatherer.
+func PrometheusHandler(gatherer prometheus.Gatherer) fiber.Handler {
+	if gatherer == nil {
+		gatherer = prometheus.DefaultGatherer
+	}
 	return func(c *fiber.Ctx) error {
-		mfs, err := prometheus.DefaultGatherer.Gather()
+		mfs, err := gatherer.Gather()
 		if err != nil {
 			if len(mfs) == 0 {
 				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
