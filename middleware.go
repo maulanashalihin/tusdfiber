@@ -50,7 +50,9 @@ func CORSMiddleware(cfg *CORSConfig) fiber.Handler {
 }
 
 // TusResumableMiddleware checks that the Tus-Resumable header is present
-// on mutating requests (POST, PATCH, DELETE). GET and HEAD are allowed without it.
+// on mutating requests (POST, PATCH, DELETE), or that Upload-Draft-Interop-Version
+// is present if the experimental protocol is enabled.
+// GET and HEAD are allowed without it.
 func TusResumableMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		method := c.Method()
@@ -62,6 +64,14 @@ func TusResumableMiddleware() fiber.Handler {
 
 		// OPTIONS is handled by CORS middleware
 		if method == fiber.MethodOptions {
+			return c.Next()
+		}
+
+		// Check for IETF resumable upload draft header
+		draftV := c.Get("Upload-Draft-Interop-Version")
+		if draftV == "3" || draftV == "4" || draftV == "5" || draftV == "6" {
+			// v2 protocol — skip the Tus-Resumable check
+			c.Set("Upload-Draft-Interop-Version", draftV)
 			return c.Next()
 		}
 

@@ -66,6 +66,10 @@ type Config struct {
 	// NetworkTimeout is the read deadline for individual body reads.
 	NetworkTimeout time.Duration
 
+	// EnableExperimentalProtocol enables the IETF resumable upload draft
+	// (Upload-Draft-Interop-Version) next to the TUS v1 protocol.
+	EnableExperimentalProtocol bool
+
 	// CORS configuration. If nil, DefaultCORSConfig is used.
 	CORS *CORSConfig
 }

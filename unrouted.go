@@ -19,7 +19,7 @@ import (
 // UnroutedHandler provides TUS protocol methods (PostFile, HeadFile, PatchFile, …)
 // that you can wire into any router. Use NewUnroutedHandler to create one.
 type UnroutedHandler struct {
-	config  Config
+	config   Config
 	composer *StoreComposer
 
 	// Notification channels (mirror tusd's interface)
@@ -65,6 +65,11 @@ func NewUnroutedHandler(config Config) (*UnroutedHandler, error) {
 
 // PostFile creates a new upload resource.
 func (h *UnroutedHandler) PostFile(c *fiber.Ctx) error {
+	// Route to v2 if the request uses the IETF resumable upload draft
+	if h.usesDraft(c) {
+		return h.PostFileV2(c)
+	}
+
 	ctx := newHookContext(c, h.config.GracefulRequestCompletionTimeout)
 	defer ctx.cancel(nil)
 
@@ -232,6 +237,8 @@ func (h *UnroutedHandler) HeadFile(c *fiber.Ctx) error {
 		return h.writeError(c, ctx, err)
 	}
 
+	isV2 := h.usesDraft(c)
+
 	resp := HTTPResponse{
 		StatusCode: http.StatusOK,
 		Header: HTTPHeader{
@@ -240,25 +247,42 @@ func (h *UnroutedHandler) HeadFile(c *fiber.Ctx) error {
 		},
 	}
 
-	if info.IsPartial {
-		resp.Header["Upload-Concat"] = "partial"
-	}
-	if info.IsFinal {
-		v := "final;"
-		for _, uid := range info.PartialUploads {
-			v += h.absFileURL(c, uid) + " "
+	if isV2 {
+		// IETF draft uses 204 No Content for HEAD
+		resp.StatusCode = http.StatusNoContent
+
+		isComplete := !info.SizeIsDeferred && info.Offset == info.Size
+		setDraftCompleteHeaders(c, getDraftVersion(c), isComplete)
+		resp.Header["Upload-Draft-Interop-Version"] = string(getDraftVersion(c))
+
+		if !info.SizeIsDeferred {
+			resp.Header["Upload-Length"] = strconv.FormatInt(info.Size, 10)
 		}
-		v = strings.TrimRight(v, " ")
-		resp.Header["Upload-Concat"] = v
-	}
-	if len(info.MetaData) != 0 {
-		resp.Header["Upload-Metadata"] = serializeMetadataHeader(info.MetaData)
-	}
-	if info.SizeIsDeferred {
-		resp.Header["Upload-Defer-Length"] = "1"
+		resp.Header["Upload-Limit"] = h.getDraftUploadLimits(info)
 	} else {
-		resp.Header["Upload-Length"] = strconv.FormatInt(info.Size, 10)
-		resp.Header["Content-Length"] = strconv.FormatInt(info.Size, 10)
+		// TUS v1 — 200 OK with full metadata
+		resp.StatusCode = http.StatusOK
+
+		if info.IsPartial {
+			resp.Header["Upload-Concat"] = "partial"
+		}
+		if info.IsFinal {
+			v := "final;"
+			for _, uid := range info.PartialUploads {
+				v += h.absFileURL(c, uid) + " "
+			}
+			v = strings.TrimRight(v, " ")
+			resp.Header["Upload-Concat"] = v
+		}
+		if len(info.MetaData) != 0 {
+			resp.Header["Upload-Metadata"] = serializeMetadataHeader(info.MetaData)
+		}
+		if info.SizeIsDeferred {
+			resp.Header["Upload-Defer-Length"] = "1"
+		} else {
+			resp.Header["Upload-Length"] = strconv.FormatInt(info.Size, 10)
+			resp.Header["Content-Length"] = strconv.FormatInt(info.Size, 10)
+		}
 	}
 
 	return h.sendResp(c, resp)
@@ -274,7 +298,15 @@ func (h *UnroutedHandler) PatchFile(c *fiber.Ctx) error {
 	defer ctx.cancel(nil)
 
 	// Validate Content-Type
-	if string(c.Request().Header.ContentType()) != "application/offset+octet-stream" {
+	ct := string(c.Request().Header.ContentType())
+	isV2 := h.usesDraft(c)
+	if isV2 {
+		// Draft v4+ requires application/partial-upload; v3 accepts anything
+		dv := getDraftVersion(c)
+		if dv != interopVersion3 && ct != "" && ct != "application/partial-upload" && ct != "application/offset+octet-stream" {
+			return h.writeError(c, ctx, ErrInvalidContentType)
+		}
+	} else if ct != "application/offset+octet-stream" {
 		return h.writeError(c, ctx, ErrInvalidContentType)
 	}
 
@@ -492,6 +524,17 @@ func (h *UnroutedHandler) Options(c *fiber.Ctx) error {
 	if h.config.MaxSize > 0 {
 		c.Set("Tus-Max-Size", strconv.FormatInt(h.config.MaxSize, 10))
 	}
+
+	// If the client requested the IETF draft, include draft-specific headers
+	dv := c.Get("Upload-Draft-Interop-Version")
+	if dv != "" && h.config.EnableExperimentalProtocol {
+		limits := "min-size=0"
+		if h.config.MaxSize > 0 {
+			limits += ",max-size=" + strconv.FormatInt(h.config.MaxSize, 10)
+		}
+		c.Set("Upload-Limit", limits)
+	}
+
 	return c.SendStatus(http.StatusOK)
 }
 
@@ -540,12 +583,15 @@ func (h *UnroutedHandler) writeChunk(
 	bodyR := newBodyReader(io.NopCloser(stream), maxSize)
 
 	// Support stopping an upload via callback
-	ctx.stopUpload = func(res HTTPResponse) {
+	stopFn := func(res HTTPResponse) {
 		cause := ErrUploadStoppedByServer
 		cause.HTTPResponse = cause.HTTPResponse.MergeWith(res)
 		ctx.cancel(cause)
 		bodyR.closeWithError(cause)
 	}
+	ctx.stopUpload = stopFn
+	RegisterStopCallback(info.ID, stopFn)
+	defer UnregisterStopCallback(info.ID)
 
 	if h.config.NotifyUploadProgress {
 		go h.sendProgressMessages(ctx, info, bodyR, offset)
